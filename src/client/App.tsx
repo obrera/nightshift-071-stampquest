@@ -1,10 +1,9 @@
 import {
   SolanaSignIn,
-  SolanaSignMessage,
-  type SolanaSignMessageMethod,
   type UiWallet,
   WalletUiIcon,
   useSignIn,
+  useSignMessage,
   useWalletUi,
   useWalletUiWallet
 } from "@wallet-ui/react";
@@ -139,6 +138,7 @@ function WalletMessageSignInOption({
 }) {
   const account = wallet.accounts?.[0];
   const [isBusy, setIsBusy] = useState(false);
+  const signMessage = useSignMessage(account);
 
   if (!account) {
     return null;
@@ -149,24 +149,16 @@ function WalletMessageSignInOption({
       className="primary-button wallet-option"
       disabled={isBusy}
       onClick={() => {
-        const signMessageFeature = (
-          wallet as UiWallet & {
-            features: Record<string, { signMessage: SolanaSignMessageMethod }>;
-          }
-        ).features[SolanaSignMessage];
         onError(null);
         onNotice(null);
         setIsBusy(true);
         void handleSiwsAuthWithSignMessage({
           address: account.address,
           refresh,
-          signMessage: async (message) => {
-            const [result] = await signMessageFeature.signMessage({
-              account,
+          signMessage: async (message) =>
+            signMessage({
               message
-            });
-            return result;
-          },
+            }),
           statement: "Sign in to StampQuest with your Solana wallet."
         })
           .then((result) => {
@@ -188,15 +180,6 @@ function WalletMessageSignInOption({
       <WalletUiIcon className="wallet-icon" wallet={wallet} />
       <span>{isBusy ? `Signing With ${wallet.name}...` : `Sign In With ${wallet.name}`}</span>
     </button>
-  );
-}
-
-function WalletUnsupportedOption({ wallet }: { wallet: UiWallet }) {
-  return (
-    <div className="ghost-button wallet-option" aria-disabled="true">
-      <WalletUiIcon className="wallet-icon" wallet={wallet} />
-      <span>{wallet.name} is connected, but this wallet cannot sign in here yet.</span>
-    </div>
   );
 }
 
@@ -417,19 +400,15 @@ export function App() {
                   );
                 }
 
-                if (SolanaSignMessage in wallet.features) {
-                  return (
-                    <WalletMessageSignInOption
-                      key={wallet.name}
-                      onError={setError}
-                      onNotice={setNotice}
-                      refresh={refresh}
-                      wallet={wallet}
-                    />
-                  );
-                }
-
-                return <WalletUnsupportedOption key={wallet.name} wallet={wallet} />;
+                return (
+                  <WalletMessageSignInOption
+                    key={wallet.name}
+                    onError={setError}
+                    onNotice={setNotice}
+                    refresh={refresh}
+                    wallet={wallet}
+                  />
+                );
               })}
             </div>
           ) : (
