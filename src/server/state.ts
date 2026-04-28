@@ -10,7 +10,7 @@ export function normalizeState(raw: unknown): AppState {
     return createSeedState();
   }
 
-  if (raw.version === 3) {
+  if (raw.version === 4) {
     return raw as unknown as AppState;
   }
 

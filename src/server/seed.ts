@@ -2,10 +2,9 @@ import type {
   ActivityRecord,
   AppState,
   RallyCheckpoint,
-  RallyRecord,
-  UserRecord
+  RallyRecord
 } from "../shared/contracts.js";
-import { createId, hashPassword, nowUtc } from "./utils.js";
+import { nowUtc } from "./utils.js";
 
 function buildRally(): RallyRecord {
   return {
@@ -96,61 +95,19 @@ function buildCheckpoints(rallyId: string): RallyCheckpoint[] {
   ];
 }
 
-function buildUsers(now: string): UserRecord[] {
-  return [
-    {
-      id: "user_operator_071",
-      username: "obrera",
-      displayName: "Obrera",
-      role: "operator",
-      passwordHash: hashPassword("nightshift071!"),
-      createdAt: now
-    },
-    {
-      id: "user_pilot_071",
-      username: "pilot",
-      displayName: "Pilot",
-      role: "participant",
-      passwordHash: hashPassword("pilotpass!"),
-      createdAt: now
-    },
-    {
-      id: "user_marina_071",
-      username: "marina",
-      displayName: "Marina",
-      role: "participant",
-      passwordHash: hashPassword("relaypass!"),
-      createdAt: now
-    }
-  ];
-}
-
-function buildActivity(user: UserRecord): ActivityRecord {
-  return {
-    id: createId("activity"),
-    userId: user.id,
-    userDisplayName: user.displayName,
-    kind: "auth",
-    headline: "Seed account ready",
-    detail: `${user.displayName} can sign into StampQuest.`,
-    createdAt: nowUtc()
-  };
-}
-
 export function createSeedState(): AppState {
-  const now = nowUtc();
   const rally = buildRally();
-  const users = buildUsers(now);
 
   return {
-    version: 3,
-    users,
+    version: 4,
+    users: [],
     sessions: [],
+    authChallenges: [],
     rallies: [rally],
     checkpoints: buildCheckpoints(rally.id),
     enrollments: [],
     redemptions: [],
     rewardClaims: [],
-    activity: users.map(buildActivity)
+    activity: [] satisfies ActivityRecord[]
   };
 }

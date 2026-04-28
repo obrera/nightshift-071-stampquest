@@ -44,10 +44,7 @@ export class FileDatabase {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       this.state = normalizeState(parsed);
-      if (
-        parsed.version !== 2 ||
-        "mintIntents" in parsed
-      ) {
+      if (parsed.version !== 4 || !("authChallenges" in parsed)) {
         await this.persist();
       }
     } catch (error) {

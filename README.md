@@ -1,10 +1,10 @@
 # StampQuest
 
-StampQuest is Nightshift build 071: a mobile-first dark-mode Solana week app for live rally passports. Participants sign up, join the active trail, redeem secret checkpoint codes, track stamp progress, and claim a collectible reward badge. Operators get a compact live operations surface for checkpoint flow, redemptions, and leaderboard movement.
+StampQuest is Nightshift build 071: a mobile-first dark-mode Solana week app for live rally passports. Participants connect a wallet, sign in with Solana, join the active trail, redeem secret checkpoint codes, track stamp progress, and claim a collectible reward badge into the signed-in wallet. Operators get a compact live operations surface for checkpoint flow, redemptions, and leaderboard movement.
 
 ## Product
 
-- Real local auth with persisted users and cookie sessions
+- Wallet-first Sign In With Solana backed by persisted users and cookie sessions
 - Passport flow with active rally progress, checkpoint stamp cards, redemption history, and reward eligibility
 - Checkpoint redemption validation with secret-code checks, duplicate prevention, cooldown rules, and progress math
 - Reward claim server path backed by `@obrera/mpl-core-kit-lib` and an execute-plugin-aware collection configuration
@@ -23,9 +23,7 @@ StampQuest is Nightshift build 071: a mobile-first dark-mode Solana week app for
 
 ## Seed Accounts
 
-- `obrera` / `nightshift071!` — operator
-- `pilot` / `pilotpass!` — participant
-- `marina` / `relaypass!` — participant
+- `STAMPQUEST_OPERATOR_WALLETS` can be set to a comma-separated allowlist of operator wallets
 
 ## Run
 
@@ -73,8 +71,8 @@ If any required reward-minting config is missing, the UI shows the exact missing
 
 - `GET /api/health`
 - `GET /api/bootstrap`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
+- `POST /api/auth/solana-auth/nonce`
+- `POST /api/auth/solana-auth/verify`
 - `POST /api/auth/logout`
 - `POST /api/rallies/join`
 - `POST /api/redeem`
@@ -86,3 +84,4 @@ If any required reward-minting config is missing, the UI shows the exact missing
 
 - `npm install` in this sandbox required `--ignore-scripts` because the `esbuild` postinstall binary check hit an `EPERM` spawn restriction here. Dependency installation still completed and the app typechecks and builds successfully in this environment.
 - The reward minting flow currently assumes an existing execute-plugin-aware collection address rather than creating that collection automatically.
+- Reward claims always mint to the wallet bound to the active SIWS session; the user no longer pastes a destination address.

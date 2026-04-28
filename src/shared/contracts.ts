@@ -2,24 +2,39 @@ export type UserRole = "operator" | "participant";
 
 export interface UserRecord {
   id: string;
-  username: string;
+  walletAddress: string;
   displayName: string;
   role: UserRole;
-  passwordHash: string;
   createdAt: string;
+  lastAuthenticatedAt: string;
 }
 
 export interface UserSummary {
   id: string;
-  username: string;
+  walletAddress: string;
   displayName: string;
   role: UserRole;
   createdAt: string;
+  lastAuthenticatedAt: string;
 }
 
 export interface SessionRecord {
   id: string;
   userId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface AuthChallengeRecord {
+  id: string;
+  walletAddress: string;
+  nonce: string;
+  domain: string;
+  uri: string;
+  chainId: string;
+  statement: string;
+  issuedAt: string;
+  expirationTime: string;
   createdAt: string;
   expiresAt: string;
 }
@@ -108,9 +123,10 @@ export interface ActivityRecord {
 }
 
 export interface AppState {
-  version: 3;
+  version: 4;
   users: UserRecord[];
   sessions: SessionRecord[];
+  authChallenges: AuthChallengeRecord[];
   rallies: RallyRecord[];
   checkpoints: RallyCheckpoint[];
   enrollments: EnrollmentRecord[];
@@ -119,10 +135,26 @@ export interface AppState {
   activity: ActivityRecord[];
 }
 
-export interface AuthRequest {
-  username: string;
-  password: string;
-  displayName?: string;
+export interface SolanaAuthNonceRequest {
+  walletAddress: string;
+}
+
+export interface SolanaAuthNonceResponse {
+  walletAddress: string;
+  nonce: string;
+  domain: string;
+  uri: string;
+  version: "1";
+  issuedAt: string;
+  expirationTime: string;
+  chainId: string;
+  statement: string;
+}
+
+export interface SolanaAuthVerifyRequest {
+  walletAddress: string;
+  signature: string;
+  message: string;
 }
 
 export interface JoinRallyRequest {
@@ -137,7 +169,6 @@ export interface RedeemCheckpointRequest {
 
 export interface ClaimRewardRequest {
   rallyId: string;
-  walletAddress: string;
 }
 
 export interface CheckpointCard {

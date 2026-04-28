@@ -1,3 +1,13 @@
+import {
+  address,
+  assertIsAddress,
+  assertIsSignature,
+  getBase58Encoder,
+  getPublicKeyFromAddress,
+  signature,
+  signatureBytes,
+  verifySignature
+} from "@solana/kit";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -5,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import type {
   ActivityRecord,
   AppState,
-  AuthRequest,
+  AuthChallengeRecord,
   BootstrapResponse,
   ClaimRewardRequest,
   EnrollmentRecord,
@@ -20,7 +30,11 @@ import type {
   RedemptionRecord,
   RedeemCheckpointRequest,
   RewardClaimRecord,
-  UserRecord
+  SolanaAuthNonceRequest,
+  SolanaAuthNonceResponse,
+  SolanaAuthVerifyRequest,
+  UserRecord,
+  UserRole
 } from "../shared/contracts.js";
 import { FileDatabase } from "./db.js";
 import { getRewardConfigStatus } from "./minting/config.js";
@@ -28,20 +42,35 @@ import { mintRewardBadge } from "./minting/solana.js";
 import {
   clearCookieHeader,
   createId,
+  createNonce,
   getEnv,
-  hashPassword,
+  normalizeWalletAddress,
   nowUtc,
   parseCookies,
   sanitizeUser,
   setCookieHeader,
-  verifyPassword
+  shortWalletAddress
 } from "./utils.js";
+
+interface ParsedSiwsMessage {
+  address: string;
+  chainId?: string;
+  domain: string;
+  expirationTime?: string;
+  issuedAt?: string;
+  nonce?: string;
+  statement?: string;
+  uri?: string;
+  version?: string;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..", "..");
 const publicDir = path.resolve(rootDir, "dist", "public");
 const cookieName = "stampquest_session";
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 14;
+const challengeMaxAgeMs = 15 * 60 * 1000;
+const authStatement = "Sign in to StampQuest with your Solana wallet.";
 const dataPath =
   getEnv("STAMPQUEST_DATA_PATH") ??
   path.resolve(rootDir, "data", "stampquest-db.json");
@@ -59,22 +88,139 @@ function asyncRoute(
   };
 }
 
+function isFieldLine(value: string): boolean {
+  return /^(URI|Version|Chain ID|Nonce|Issued At|Expiration Time|Not Before|Request ID|Resources): /.test(
+    value
+  ) || value === "Resources:";
+}
+
+function parseSiwsMessage(message: string): ParsedSiwsMessage {
+  const normalized = message.replace(/\r/g, "");
+  const lines = normalized.split("\n");
+  const header = lines[0]?.match(/^(.*) wants you to sign in with your Solana account:$/);
+  if (!header?.[1] || !lines[1]?.trim()) {
+    throw new Error("Invalid SIWS message.");
+  }
+
+  const parsed: ParsedSiwsMessage = {
+    domain: header[1],
+    address: lines[1].trim()
+  };
+
+  let cursor = 2;
+  if (lines[cursor] === "") {
+    cursor += 1;
+  }
+
+  const fieldIndex = lines.findIndex((line, index) => index >= cursor && isFieldLine(line));
+  if (fieldIndex === -1) {
+    throw new Error("SIWS message is missing required fields.");
+  }
+
+  const statementLines = lines.slice(cursor, fieldIndex).filter((line) => line !== "");
+  parsed.statement = statementLines.length > 0 ? statementLines.join("\n") : undefined;
+
+  for (let index = fieldIndex; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+
+    const separator = line.indexOf(": ");
+    if (separator === -1) {
+      throw new Error("SIWS message contains an invalid field.");
+    }
+
+    const key = line.slice(0, separator);
+    const value = line.slice(separator + 2);
+    switch (key) {
+      case "URI":
+        parsed.uri = value;
+        break;
+      case "Version":
+        parsed.version = value;
+        break;
+      case "Chain ID":
+        parsed.chainId = value;
+        break;
+      case "Nonce":
+        parsed.nonce = value;
+        break;
+      case "Issued At":
+        parsed.issuedAt = value;
+        break;
+      case "Expiration Time":
+        parsed.expirationTime = value;
+        break;
+      case "Resources":
+        index = lines.length;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return parsed;
+}
+
+async function verifySolanaSignature(args: {
+  message: string;
+  signatureValue: string;
+  walletAddress: string;
+}): Promise<boolean> {
+  const publicKey = await getPublicKeyFromAddress(address(args.walletAddress));
+  return verifySignature(
+    publicKey,
+    signatureBytes(getBase58Encoder().encode(signature(args.signatureValue))),
+    new TextEncoder().encode(args.message)
+  );
+}
+
+function cleanupAuthState(state: AppState) {
+  state.sessions = state.sessions.filter(
+    (entry) => new Date(entry.expiresAt).getTime() > Date.now()
+  );
+  state.authChallenges = state.authChallenges.filter(
+    (entry) => new Date(entry.expirationTime).getTime() > Date.now()
+  );
+}
+
+function getOperatorWalletAllowlist(): Set<string> {
+  return new Set(
+    (getEnv("STAMPQUEST_OPERATOR_WALLETS") ?? "")
+      .split(",")
+      .map((entry) => normalizeWalletAddress(entry))
+      .filter(Boolean)
+  );
+}
+
+function resolveUserRole(walletAddress: string): UserRole {
+  return getOperatorWalletAllowlist().has(normalizeWalletAddress(walletAddress))
+    ? "operator"
+    : "participant";
+}
+
 function getSessionUser(state: AppState, request: Request): UserRecord | null {
+  cleanupAuthState(state);
   const sessionId = parseCookies(request)[cookieName];
   if (!sessionId) {
     return null;
   }
 
-  const session = state.sessions.find(
-    (entry) =>
-      entry.id === sessionId &&
-      new Date(entry.expiresAt).getTime() > Date.now()
-  );
+  const session = state.sessions.find((entry) => entry.id === sessionId);
   if (!session) {
     return null;
   }
 
-  return state.users.find((entry) => entry.id === session.userId) ?? null;
+  const user = state.users.find((entry) => entry.id === session.userId);
+  if (!user) {
+    return null;
+  }
+
+  return {
+    ...user,
+    role: resolveUserRole(user.walletAddress)
+  };
 }
 
 async function requireUser(request: Request, response: Response) {
@@ -86,22 +232,6 @@ async function requireUser(request: Request, response: Response) {
   }
 
   return { state, user };
-}
-
-function validateAuthPayload(payload: Partial<AuthRequest>) {
-  const username = payload.username?.trim().toLowerCase() ?? "";
-  const password = payload.password ?? "";
-  const displayName = payload.displayName?.trim() || username;
-
-  if (username.length < 3) {
-    throw new Error("Username must be at least 3 characters.");
-  }
-
-  if (password.length < 8) {
-    throw new Error("Password must be at least 8 characters.");
-  }
-
-  return { username, password, displayName };
 }
 
 function makeActivity(
@@ -148,10 +278,7 @@ function getUserRedemptions(state: AppState, userId: string, rallyId: string) {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-function buildPassport(
-  state: AppState,
-  user: UserRecord
-): PassportProgress | null {
+function buildPassport(state: AppState, user: UserRecord): PassportProgress | null {
   const enrollment = getActiveEnrollment(state, user.id);
   if (!enrollment) {
     return null;
@@ -268,6 +395,7 @@ function buildLeaderboard(state: AppState, rallyId: string): LeaderboardEntry[] 
     if (!user) {
       continue;
     }
+
     const current =
       entries.get(user.id) ??
       {
@@ -383,6 +511,25 @@ function buildBootstrap(state: AppState, user: UserRecord | null): BootstrapResp
   };
 }
 
+function getAuthOrigin(request: Request): { domain: string; uri: string } {
+  const forwardedHost = request.get("x-forwarded-host");
+  const forwardedProto = request.get("x-forwarded-proto");
+  const host = forwardedHost ?? request.get("host") ?? "localhost:3001";
+  const protocol = forwardedProto ?? request.protocol ?? "http";
+  return {
+    domain: host,
+    uri: `${protocol}://${host}`
+  };
+}
+
+function assertValidWalletAddress(walletAddress: string) {
+  try {
+    assertIsAddress(walletAddress);
+  } catch {
+    throw new Error("Wallet address must be a valid Solana address.");
+  }
+}
+
 app.get(
   "/api/health",
   asyncRoute(async (_request, response) => {
@@ -399,81 +546,173 @@ app.get(
 );
 
 app.post(
-  "/api/auth/register",
+  "/api/auth/solana-auth/nonce",
   asyncRoute(async (request, response) => {
-    const payload = validateAuthPayload(request.body as Partial<AuthRequest>);
-    const sessionId = createId("sess");
+    const payload = request.body as Partial<SolanaAuthNonceRequest>;
+    const walletAddress = normalizeWalletAddress(payload.walletAddress ?? "");
+    assertValidWalletAddress(walletAddress);
 
-    const user = await db.update((state) => {
-      if (state.users.some((entry) => entry.username === payload.username)) {
-        throw new Error("Username is already in use.");
-      }
+    const { domain, uri } = getAuthOrigin(request);
+    const issuedAt = nowUtc();
+    const challenge: AuthChallengeRecord = {
+      id: createId("challenge"),
+      walletAddress,
+      nonce: createNonce(),
+      domain,
+      uri,
+      chainId: "solana:devnet",
+      statement: authStatement,
+      issuedAt,
+      expirationTime: new Date(Date.now() + challengeMaxAgeMs).toISOString(),
+      createdAt: issuedAt,
+      expiresAt: new Date(Date.now() + challengeMaxAgeMs).toISOString()
+    };
 
-      const createdAt = nowUtc();
-      const createdUser: UserRecord = {
-        id: createId("user"),
-        username: payload.username,
-        displayName: payload.displayName,
-        role: "participant",
-        passwordHash: hashPassword(payload.password),
-        createdAt
-      };
-
-      state.users.push(createdUser);
-      state.sessions.push({
-        id: sessionId,
-        userId: createdUser.id,
-        createdAt,
-        expiresAt: new Date(Date.now() + sessionMaxAgeSeconds * 1000).toISOString()
-      });
-      state.activity.unshift(
-        makeActivity(createdUser, "auth", "Joined StampQuest", "Created an account.")
+    await db.update((state) => {
+      cleanupAuthState(state);
+      state.authChallenges = state.authChallenges.filter(
+        (entry) => entry.walletAddress !== walletAddress
       );
-      return createdUser;
+      state.authChallenges.unshift(challenge);
     });
 
-    response.setHeader(
-      "Set-Cookie",
-      setCookieHeader(cookieName, sessionId, sessionMaxAgeSeconds)
-    );
-    response.status(201).json({ user: sanitizeUser(user) });
+    const result: SolanaAuthNonceResponse = {
+      walletAddress: challenge.walletAddress,
+      nonce: challenge.nonce,
+      domain: challenge.domain,
+      uri: challenge.uri,
+      version: "1",
+      issuedAt: challenge.issuedAt,
+      expirationTime: challenge.expirationTime,
+      chainId: challenge.chainId,
+      statement: challenge.statement
+    };
+    response.json(result);
   })
 );
 
 app.post(
-  "/api/auth/login",
+  "/api/auth/solana-auth/verify",
   asyncRoute(async (request, response) => {
-    const payload = validateAuthPayload(request.body as Partial<AuthRequest>);
-    const sessionId = createId("sess");
+    const payload = request.body as Partial<SolanaAuthVerifyRequest>;
+    const walletAddress = normalizeWalletAddress(payload.walletAddress ?? "");
+    const message = String(payload.message ?? "");
+    const signatureValue = String(payload.signature ?? "");
 
-    const user = await db.update((state) => {
-      const existing = state.users.find((entry) => entry.username === payload.username);
-      if (!existing || !verifyPassword(payload.password, existing.passwordHash)) {
-        throw new Error("Invalid username or password.");
+    assertValidWalletAddress(walletAddress);
+    try {
+      assertIsSignature(signature(signatureValue));
+    } catch {
+      throw new Error("Signature must be a valid Solana signature.");
+    }
+
+    const parsedMessage = parseSiwsMessage(message);
+    assertValidWalletAddress(parsedMessage.address);
+
+    if (normalizeWalletAddress(parsedMessage.address) !== walletAddress) {
+      response.status(401).json({ error: "Signed wallet does not match the requested wallet." });
+      return;
+    }
+
+    const outcome = await db.update(async (state) => {
+      cleanupAuthState(state);
+
+      const challenge = state.authChallenges.find(
+        (entry) =>
+          entry.walletAddress === walletAddress &&
+          entry.nonce === parsedMessage.nonce
+      );
+      if (!challenge) {
+        throw new Error("Invalid or expired SIWS challenge. Request a new wallet sign-in.");
       }
 
-      state.sessions = state.sessions.filter(
-        (entry) =>
-          entry.userId !== existing.id ||
-          new Date(entry.expiresAt).getTime() > Date.now()
+      if (
+        parsedMessage.domain !== challenge.domain ||
+        parsedMessage.uri !== challenge.uri ||
+        parsedMessage.chainId !== challenge.chainId ||
+        parsedMessage.nonce !== challenge.nonce ||
+        parsedMessage.issuedAt !== challenge.issuedAt ||
+        parsedMessage.expirationTime !== challenge.expirationTime ||
+        parsedMessage.statement !== challenge.statement ||
+        parsedMessage.version !== "1"
+      ) {
+        throw new Error("SIWS message contents do not match the active challenge.");
+      }
+
+      if (new Date(challenge.expirationTime).getTime() <= Date.now()) {
+        throw new Error("SIWS challenge expired. Request a new wallet sign-in.");
+      }
+
+      const verified = await verifySolanaSignature({
+        message,
+        signatureValue,
+        walletAddress
+      });
+      if (!verified) {
+        throw new Error("Wallet signature verification failed.");
+      }
+
+      state.authChallenges = state.authChallenges.filter(
+        (entry) => entry.id !== challenge.id
       );
+
+      const now = nowUtc();
+      const role = resolveUserRole(walletAddress);
+      const existingUser = state.users.find((entry) => entry.walletAddress === walletAddress);
+      const user =
+        existingUser ??
+        {
+          id: createId("user"),
+          walletAddress,
+          displayName: shortWalletAddress(walletAddress),
+          role,
+          createdAt: now,
+          lastAuthenticatedAt: now
+        };
+
+      user.role = role;
+      user.lastAuthenticatedAt = now;
+
+      if (!existingUser) {
+        state.users.push(user);
+      }
+
+      state.sessions = state.sessions.filter((entry) => entry.userId !== user.id);
+      const sessionId = createId("sess");
       state.sessions.push({
         id: sessionId,
-        userId: existing.id,
-        createdAt: nowUtc(),
+        userId: user.id,
+        createdAt: now,
         expiresAt: new Date(Date.now() + sessionMaxAgeSeconds * 1000).toISOString()
       });
       state.activity.unshift(
-        makeActivity(existing, "auth", "Signed back in", "Session refreshed.")
+        makeActivity(
+          user,
+          "auth",
+          existingUser ? "Wallet signed back in" : "Wallet joined StampQuest",
+          existingUser
+            ? "Session refreshed with Sign In With Solana."
+            : "Created a passport session from the connected wallet."
+        )
       );
-      return existing;
+
+      return {
+        isNewUser: !existingUser,
+        sessionId,
+        user: {
+          ...user
+        }
+      };
     });
 
     response.setHeader(
       "Set-Cookie",
-      setCookieHeader(cookieName, sessionId, sessionMaxAgeSeconds)
+      setCookieHeader(cookieName, outcome.sessionId, sessionMaxAgeSeconds)
     );
-    response.json({ user: sanitizeUser(user) });
+    response.json({
+      isNewUser: outcome.isNewUser,
+      user: sanitizeUser(outcome.user)
+    });
   })
 );
 
@@ -652,6 +891,24 @@ app.post(
       return;
     }
 
+    const existingSuccessful = auth.state.rewardClaims.find(
+      (entry) =>
+        entry.userId === auth.user.id &&
+        entry.rallyId === rally.id &&
+        (entry.status === "submitted" || entry.status === "minted")
+    );
+    if (existingSuccessful) {
+      response.status(409).json({
+        claim: existingSuccessful,
+        rewardConfig: getRewardConfigStatus(),
+        error:
+          existingSuccessful.status === "minted"
+            ? "Reward already claimed for this passport."
+            : "Reward claim is already in progress."
+      });
+      return;
+    }
+
     const rewardConfig = getRewardConfigStatus();
     const createdAt = nowUtc();
 
@@ -661,7 +918,7 @@ app.post(
           id: createId("claim"),
           userId: auth.user.id,
           rallyId: rally.id,
-          walletAddress: payload.walletAddress.trim(),
+          walletAddress: auth.user.walletAddress,
           status: "blocked",
           createdAt,
           updatedAt: createdAt,
@@ -694,7 +951,7 @@ app.post(
         id: createId("claim"),
         userId: auth.user.id,
         rallyId: rally.id,
-        walletAddress: payload.walletAddress.trim(),
+        walletAddress: auth.user.walletAddress,
         status: "submitted",
         createdAt,
         updatedAt: createdAt,
@@ -709,7 +966,7 @@ app.post(
           auth.user,
           "claim",
           "Reward claim submitted",
-          `Minting ${rally.reward.name}.`
+          `Minting ${rally.reward.name} to ${shortWalletAddress(auth.user.walletAddress)}.`
         )
       );
       return claim;
@@ -719,7 +976,7 @@ app.post(
       const minted = await mintRewardBadge({
         name: `${rally.reward.name} • ${auth.user.displayName}`,
         metadataUrl,
-        walletAddress: payload.walletAddress.trim()
+        walletAddress: auth.user.walletAddress
       });
 
       const finalClaim = await db.update((state) => {

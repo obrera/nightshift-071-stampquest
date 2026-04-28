@@ -134,7 +134,7 @@ h2 {
 .trail-copy small,
 .rally-card p,
 .operator-item p,
-.seed-note span {
+.wallet-card span {
   color: var(--muted);
   line-height: 1.5;
 }
@@ -343,6 +343,65 @@ input {
   gap: 14px;
 }
 
+.wallet-options {
+  display: grid;
+  gap: 10px;
+}
+
+.wallet-list {
+  display: grid;
+  gap: 10px;
+}
+
+.wallet-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+}
+
+.wallet-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.auth-status,
+.claim-wallet,
+.empty-wallet-state {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+}
+
+.claim-wallet,
+.empty-wallet-state {
+  display: grid;
+}
+
+.auth-status p,
+.claim-wallet span {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.wallet-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wallet-card--compact {
+  padding: 14px;
+}
+
 .trail-copy {
   display: grid;
   gap: 6px;
@@ -373,11 +432,6 @@ input {
 
 .metric-grid strong {
   font-size: 1.8rem;
-}
-
-.seed-note {
-  display: grid;
-  gap: 6px;
 }
 
 .banner {

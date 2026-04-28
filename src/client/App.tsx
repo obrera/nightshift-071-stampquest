@@ -1,19 +1,21 @@
-import { startTransition, useEffect, useState, type FormEvent } from "react";
+import {
+  SolanaSignIn,
+  type UiWallet,
+  WalletUiIcon,
+  useSignIn,
+  useWalletUi,
+  useWalletUiWallet
+} from "@wallet-ui/react";
+import { startTransition, useEffect, useState } from "react";
 import type {
   BootstrapResponse,
   ClaimRewardRequest,
   JoinRallyRequest,
   RedeemCheckpointRequest
 } from "../shared/contracts";
+import { handleSiwsAuth } from "./handle-siws-auth";
 
 type TabId = "passport" | "trail" | "reward" | "operator";
-type AuthMode = "login" | "register";
-
-interface AuthFormState {
-  username: string;
-  password: string;
-  displayName: string;
-}
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -38,27 +40,108 @@ function formatUtc(value: string): string {
   });
 }
 
+function shortAddress(value: string): string {
+  return value.length <= 12 ? value : `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function WalletConnectOption({
+  busy,
+  wallet
+}: {
+  busy: boolean;
+  wallet: UiWallet;
+}) {
+  const { connect, isConnecting } = useWalletUiWallet({ wallet });
+
+  return (
+    <button
+      className="ghost-button wallet-option"
+      disabled={busy || isConnecting}
+      onClick={() => void connect()}
+      type="button"
+    >
+      <WalletUiIcon className="wallet-icon" wallet={wallet} />
+      <span>{isConnecting ? `Connecting ${wallet.name}...` : `Connect ${wallet.name}`}</span>
+    </button>
+  );
+}
+
+function WalletSignInOption({
+  onError,
+  onNotice,
+  refresh,
+  wallet
+}: {
+  onError: (value: string | null) => void;
+  onNotice: (value: string | null) => void;
+  refresh: () => Promise<void>;
+  wallet: UiWallet;
+}) {
+  const account = wallet.accounts?.[0];
+  const signIn = useSignIn(wallet);
+  const [isBusy, setIsBusy] = useState(false);
+
+  if (!account) {
+    return null;
+  }
+
+  return (
+    <button
+      className="primary-button wallet-option"
+      disabled={isBusy}
+      onClick={() => {
+        onError(null);
+        onNotice(null);
+        setIsBusy(true);
+        void handleSiwsAuth({
+          address: account.address,
+          refresh,
+          signIn,
+          statement: "Sign in to StampQuest with your Solana wallet."
+        })
+          .then((result) => {
+            onNotice(
+              result.isNewUser
+                ? "Wallet connected. Passport created."
+                : "Wallet session refreshed."
+            );
+          })
+          .catch((reason: unknown) => {
+            onError(reason instanceof Error ? reason.message : "Wallet sign-in failed.");
+          })
+          .finally(() => {
+            setIsBusy(false);
+          });
+      }}
+      type="button"
+    >
+      <WalletUiIcon className="wallet-icon" wallet={wallet} />
+      <span>{isBusy ? `Signing With ${wallet.name}...` : `Sign In With ${wallet.name}`}</span>
+    </button>
+  );
+}
+
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
   const [tab, setTab] = useState<TabId>("passport");
-  const [authMode, setAuthMode] = useState<AuthMode>("login");
-  const [authForm, setAuthForm] = useState<AuthFormState>({
-    username: "pilot",
-    password: "pilotpass!",
-    displayName: ""
-  });
   const [codeByCheckpoint, setCodeByCheckpoint] = useState<Record<string, string>>({});
-  const [walletAddress, setWalletAddress] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
 
+  const { account, disconnect, wallets } = useWalletUi();
+  const connectedWalletAddress = account?.address ?? "";
   const user = bootstrap?.session.user ?? null;
   const activeRally = bootstrap?.rallies.find((entry) => entry.active) ?? bootstrap?.rallies[0];
   const passport = bootstrap?.passport ?? null;
   const rewardConfig = bootstrap?.rewardConfig;
   const rewardClaim = bootstrap?.rewardClaim;
   const operatorOverview = bootstrap?.operatorOverview;
+  const hasWalletMismatch = Boolean(
+    user && connectedWalletAddress && connectedWalletAddress !== user.walletAddress
+  );
+  const supportedWallets = wallets.filter((entry) => SolanaSignIn in entry.features);
 
   async function refresh() {
     const data = await api<BootstrapResponse>("/api/bootstrap");
@@ -74,28 +157,9 @@ export function App() {
     });
   }, []);
 
-  async function submitAuth(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusyKey("auth");
-    setError(null);
-
-    try {
-      const url = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
-      await api(url, {
-        method: "POST",
-        body: JSON.stringify(authForm)
-      });
-      await refresh();
-      setNotice(authMode === "login" ? "Signed in." : "Account created.");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Authentication failed.");
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
   async function logout() {
     setBusyKey("logout");
+    setError(null);
     try {
       await api("/api/auth/logout", {
         method: "POST"
@@ -172,8 +236,7 @@ export function App() {
 
     try {
       const payload: ClaimRewardRequest = {
-        rallyId: activeRally.id,
-        walletAddress
+        rallyId: activeRally.id
       };
       const result = await api<{ claim: { message: string } }>("/api/rewards/claim", {
         method: "POST",
@@ -200,87 +263,85 @@ export function App() {
           <p className="eyebrow">Nightshift Build 071</p>
           <h1>StampQuest</h1>
           <p className="lede">
-            A mobile passport for pop-up trails, checkpoint codes, live progress,
-            and a collectible Solana reward badge.
+            A mobile passport for Solana Week trails, checkpoint codes, live progress,
+            and connected-wallet reward badges.
           </p>
           <div className="hero-stamps">
-            {bootstrap.rallies[0] ? (
-              <>
-                <span>{bootstrap.rallies[0].city}</span>
-                <span>{bootstrap.rallies[0].checkpointCount} checkpoints</span>
-                <span>Reward at {bootstrap.rallies[0].reward.requiredCheckpoints} stamps</span>
-              </>
-            ) : null}
+            <span>Wallet-first access</span>
+            <span>SIWS cookie session</span>
+            <span>Reward claims mint to your signed-in wallet</span>
           </div>
         </section>
 
         <section className="sheet auth-card">
-          <div className="mode-switch">
-            <button
-              className={authMode === "login" ? "active" : ""}
-              onClick={() => setAuthMode("login")}
-              type="button"
-            >
-              Sign In
-            </button>
-            <button
-              className={authMode === "register" ? "active" : ""}
-              onClick={() => setAuthMode("register")}
-              type="button"
-            >
-              Register
-            </button>
+          <div className="section-head">
+            <h3>Sign In With Solana</h3>
+            <span>{connectedWalletAddress ? shortAddress(connectedWalletAddress) : "Not connected"}</span>
           </div>
+          <p className="muted">
+            Connect a wallet, sign the SIWS challenge, and open the live passport.
+            Username, password, and manual destination-wallet entry are gone from the user flow.
+          </p>
 
-          <form className="stack" onSubmit={submitAuth}>
-            <label>
-              <span>Username</span>
-              <input
-                onChange={(event) =>
-                  setAuthForm((current) => ({ ...current, username: event.target.value }))
-                }
-                value={authForm.username}
-              />
-            </label>
-            <label>
-              <span>Password</span>
-              <input
-                onChange={(event) =>
-                  setAuthForm((current) => ({ ...current, password: event.target.value }))
-                }
-                type="password"
-                value={authForm.password}
-              />
-            </label>
-            {authMode === "register" ? (
-              <label>
-                <span>Display name</span>
-                <input
-                  onChange={(event) =>
-                    setAuthForm((current) => ({
-                      ...current,
-                      displayName: event.target.value
-                    }))
+          {connectedWalletAddress ? (
+            <div className="auth-status">
+              <div>
+                <strong>{shortAddress(connectedWalletAddress)}</strong>
+                <p>Connected wallet</p>
+              </div>
+              <button
+                className="ghost-button"
+                disabled={disconnecting}
+                onClick={() => {
+                  setError(null);
+                  setNotice(null);
+                  setDisconnecting(true);
+                  try {
+                    disconnect();
+                    setNotice("Wallet disconnected.");
+                  } catch (reason: unknown) {
+                    setError(
+                      reason instanceof Error ? reason.message : "Failed to disconnect wallet."
+                    );
+                  } finally {
+                    setDisconnecting(false);
                   }
-                  value={authForm.displayName}
-                />
-              </label>
-            ) : null}
-            <button className="primary-button" disabled={busyKey === "auth"} type="submit">
-              {busyKey === "auth"
-                ? "Working..."
-                : authMode === "login"
-                  ? "Open Passport"
-                  : "Create Passport"}
-            </button>
-          </form>
+                }}
+                type="button"
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : null}
 
-          <div className="seed-note">
-            <strong>Seed logins</strong>
-            <span>`obrera / nightshift071!` operator</span>
-            <span>`pilot / pilotpass!` participant</span>
-            <span>`marina / relaypass!` participant</span>
-          </div>
+          {supportedWallets.length > 0 ? (
+            <div className="wallet-list">
+              {supportedWallets.map((wallet) =>
+                wallet.accounts?.[0] ? (
+                  <WalletSignInOption
+                    key={wallet.name}
+                    onError={setError}
+                    onNotice={setNotice}
+                    refresh={refresh}
+                    wallet={wallet}
+                  />
+                ) : (
+                  <WalletConnectOption
+                    busy={Boolean(busyKey)}
+                    key={wallet.name}
+                    wallet={wallet}
+                  />
+                )
+              )}
+            </div>
+          ) : (
+            <div className="empty-wallet-state">
+              <strong>No Solana wallet detected.</strong>
+              <p className="muted">
+                Install a Wallet Standard compatible Solana wallet to use the live product.
+              </p>
+            </div>
+          )}
         </section>
 
         {notice ? <div className="banner notice">{notice}</div> : null}
@@ -298,16 +359,23 @@ export function App() {
         <div>
           <p className="eyebrow">StampQuest Passport</p>
           <h1>{activeRally?.title ?? "Live Rally"}</h1>
-          <p className="lede">
-            {activeRally?.summary}
-          </p>
+          <p className="lede">{activeRally?.summary}</p>
         </div>
         <div className="topbar-actions">
           <div className="identity-chip">
             <strong>{user.displayName}</strong>
             <span>{user.role}</span>
           </div>
-          <button className="ghost-button" disabled={busyKey === "logout"} onClick={logout} type="button">
+          <div className="identity-chip">
+            <strong>{shortAddress(user.walletAddress)}</strong>
+            <span>{connectedWalletAddress ? "wallet connected" : "session wallet"}</span>
+          </div>
+          <button
+            className="ghost-button"
+            disabled={busyKey === "logout"}
+            onClick={() => void logout()}
+            type="button"
+          >
             Sign Out
           </button>
         </div>
@@ -315,11 +383,22 @@ export function App() {
 
       {notice ? <div className="banner notice">{notice}</div> : null}
       {error ? <div className="banner error">{error}</div> : null}
+      {hasWalletMismatch ? (
+        <div className="banner error">
+          Connected wallet {shortAddress(connectedWalletAddress)} does not match the active
+          session wallet {shortAddress(user.walletAddress)}. Sign out and sign back in to switch
+          wallets.
+        </div>
+      ) : null}
 
       <section className="passport-hero sheet">
         <div>
           <p className="eyebrow">Active Passport</p>
-          <h2>{passport ? `${passport.redeemedCount}/${passport.totalCheckpoints} stamps` : "No active rally yet"}</h2>
+          <h2>
+            {passport
+              ? `${passport.redeemedCount}/${passport.totalCheckpoints} stamps`
+              : "No active rally yet"}
+          </h2>
           <p className="muted">
             {passport
               ? `${passport.totalPoints} trail points collected. Reward unlocks at ${passport.requiredCheckpoints} checkpoints.`
@@ -332,11 +411,35 @@ export function App() {
       </section>
 
       <nav className="bottom-nav">
-        <button className={tab === "passport" ? "active" : ""} onClick={() => setTab("passport")} type="button">Passport</button>
-        <button className={tab === "trail" ? "active" : ""} onClick={() => setTab("trail")} type="button">Trail</button>
-        <button className={tab === "reward" ? "active" : ""} onClick={() => setTab("reward")} type="button">Reward</button>
+        <button
+          className={tab === "passport" ? "active" : ""}
+          onClick={() => setTab("passport")}
+          type="button"
+        >
+          Passport
+        </button>
+        <button
+          className={tab === "trail" ? "active" : ""}
+          onClick={() => setTab("trail")}
+          type="button"
+        >
+          Trail
+        </button>
+        <button
+          className={tab === "reward" ? "active" : ""}
+          onClick={() => setTab("reward")}
+          type="button"
+        >
+          Reward
+        </button>
         {user.role === "operator" ? (
-          <button className={tab === "operator" ? "active" : ""} onClick={() => setTab("operator")} type="button">Operator</button>
+          <button
+            className={tab === "operator" ? "active" : ""}
+            onClick={() => setTab("operator")}
+            type="button"
+          >
+            Operator
+          </button>
         ) : null}
       </nav>
 
@@ -353,10 +456,14 @@ export function App() {
                   <article className={`rally-card ${rally.active ? "active" : ""}`} key={rally.id}>
                     <div>
                       <strong>{rally.title}</strong>
-                      <p>{rally.city} • {rally.seasonLabel}</p>
+                      <p>
+                        {rally.city} • {rally.seasonLabel}
+                      </p>
                     </div>
                     <div className="rally-meta">
-                      <span>{rally.redeemedCount}/{rally.checkpointCount}</span>
+                      <span>
+                        {rally.redeemedCount}/{rally.checkpointCount}
+                      </span>
                       <button
                         className="ghost-button"
                         disabled={busyKey === `join:${rally.id}`}
@@ -378,11 +485,18 @@ export function App() {
               </div>
               <div className="stamp-grid">
                 {passport?.checkpointCards.map((checkpoint) => (
-                  <article className={`stamp-card ${checkpoint.redeemed ? "redeemed" : ""}`} key={checkpoint.id}>
+                  <article
+                    className={`stamp-card ${checkpoint.redeemed ? "redeemed" : ""}`}
+                    key={checkpoint.id}
+                  >
                     <p className="eyebrow">{checkpoint.stampLabel}</p>
                     <strong>{checkpoint.title}</strong>
                     <span>{checkpoint.district}</span>
-                    <small>{checkpoint.redeemed ? `Stamped ${formatUtc(checkpoint.redeemedAt!)}` : checkpoint.hint}</small>
+                    <small>
+                      {checkpoint.redeemed
+                        ? `Stamped ${formatUtc(checkpoint.redeemedAt!)}`
+                        : checkpoint.hint}
+                    </small>
                   </article>
                 )) ?? <p className="muted">No active passport yet.</p>}
               </div>
@@ -398,7 +512,9 @@ export function App() {
                   <article className="history-item" key={entry.id}>
                     <div>
                       <strong>{entry.checkpointTitle}</strong>
-                      <p>{entry.district} • code {entry.code}</p>
+                      <p>
+                        {entry.district} • code {entry.code}
+                      </p>
                     </div>
                     <div>
                       <span>+{entry.pointsAwarded}</span>
@@ -467,20 +583,16 @@ export function App() {
               </div>
               <p className="muted">
                 {passport?.rewardEligible
-                  ? "Your passport is eligible. Submit a Solana wallet address to claim the badge."
+                  ? `Your signed-in wallet ${shortAddress(user.walletAddress)} will receive the badge after claim verification.`
                   : `Claim unlocks at ${passport?.requiredCheckpoints ?? 0} stamped checkpoints.`}
               </p>
-              <label>
-                <span>Destination wallet</span>
-                <input
-                  onChange={(event) => setWalletAddress(event.target.value)}
-                  placeholder="Solana address"
-                  value={walletAddress}
-                />
-              </label>
+              <div className="claim-wallet">
+                <strong>{shortAddress(user.walletAddress)}</strong>
+                <span>Signed-in reward wallet</span>
+              </div>
               <button
                 className="primary-button"
-                disabled={!passport?.rewardEligible || busyKey === "claim"}
+                disabled={!passport?.rewardEligible || busyKey === "claim" || hasWalletMismatch}
                 onClick={() => void claimReward()}
                 type="button"
               >
@@ -494,9 +606,16 @@ export function App() {
                 <span>{rewardConfig?.status}</span>
               </div>
               <ul className="status-list">
-                <li>Public base URL: {rewardConfig?.publicBaseUrlConfigured ? "configured" : "missing"}</li>
+                <li>
+                  Public base URL: {rewardConfig?.publicBaseUrlConfigured ? "configured" : "missing"}
+                </li>
                 <li>Devnet signer: {rewardConfig?.signerConfigured ? "configured" : "missing"}</li>
-                <li>Execute-plugin collection: {rewardConfig?.executePluginCollectionConfigured ? rewardConfig.collectionAddress : "missing"}</li>
+                <li>
+                  Execute-plugin collection:{" "}
+                  {rewardConfig?.executePluginCollectionConfigured
+                    ? rewardConfig.collectionAddress
+                    : "missing"}
+                </li>
               </ul>
               <p className="muted">{rewardConfig?.message}</p>
             </section>
@@ -510,6 +629,7 @@ export function App() {
                 <p>{rewardClaim.message}</p>
                 <div className="claim-meta">
                   <span>{formatUtc(rewardClaim.updatedAt)}</span>
+                  <span>{shortAddress(rewardClaim.walletAddress)}</span>
                   {rewardClaim.explorerUrls ? (
                     <a href={rewardClaim.explorerUrls.transaction} rel="noreferrer" target="_blank">
                       View transaction
@@ -529,9 +649,18 @@ export function App() {
                 <span>{operatorOverview.liveRallyTitle}</span>
               </div>
               <div className="metric-grid">
-                <article><strong>{operatorOverview.participantCount}</strong><span>participants</span></article>
-                <article><strong>{operatorOverview.redemptionCount}</strong><span>redemptions</span></article>
-                <article><strong>{operatorOverview.rewardEligibleCount}</strong><span>eligible</span></article>
+                <article>
+                  <strong>{operatorOverview.participantCount}</strong>
+                  <span>participants</span>
+                </article>
+                <article>
+                  <strong>{operatorOverview.redemptionCount}</strong>
+                  <span>redemptions</span>
+                </article>
+                <article>
+                  <strong>{operatorOverview.rewardEligibleCount}</strong>
+                  <span>eligible</span>
+                </article>
               </div>
             </section>
 
@@ -566,7 +695,9 @@ export function App() {
                   <article className="history-item" key={entry.id}>
                     <div>
                       <strong>{entry.participantName}</strong>
-                      <p>{entry.checkpointTitle} • {entry.code}</p>
+                      <p>
+                        {entry.checkpointTitle} • {entry.code}
+                      </p>
                     </div>
                     <small>{formatUtc(entry.createdAt)}</small>
                   </article>
@@ -583,12 +714,18 @@ export function App() {
                 {operatorOverview.leaderboard.map((entry, index) => (
                   <article className="operator-item" key={entry.userId}>
                     <div>
-                      <strong>#{index + 1} {entry.displayName}</strong>
+                      <strong>
+                        #{index + 1} {entry.displayName}
+                      </strong>
                       <p>{entry.redeemedCount} checkpoints</p>
                     </div>
                     <div>
                       <span>{entry.totalPoints} pts</span>
-                      <small>{entry.lastRedeemedAt ? formatUtc(entry.lastRedeemedAt) : "No stamps yet"}</small>
+                      <small>
+                        {entry.lastRedeemedAt
+                          ? formatUtc(entry.lastRedeemedAt)
+                          : "No stamps yet"}
+                      </small>
                     </div>
                   </article>
                 ))}

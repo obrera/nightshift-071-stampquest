@@ -19,6 +19,7 @@
 - `2026-04-28T01:10:00Z` ran dependency install with `--ignore-scripts` because the sandbox rejected the `esbuild` postinstall binary spawn with `EPERM`.
 - `2026-04-28T01:11:00Z` ran `npm run typecheck` and fixed the remaining server typing issues.
 - `2026-04-28T01:11:30Z` ran `npm run build` successfully for client and server outputs.
+- `2026-04-28T02:10:00Z` replaced username/password auth with wallet-first SIWS sessions, switched reward claims to the signed-in wallet, and restored operator access through a wallet allowlist path.
 
 ## Verification
 
