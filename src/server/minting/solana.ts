@@ -1,4 +1,4 @@
-import { fetchMaybeCollectionV1, getCreateV1Instruction } from "@obrera/mpl-core-kit-lib";
+import { fetchMaybeCollectionV1, getCreateV2Instruction } from "@obrera/mpl-core-kit-lib";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -74,14 +74,13 @@ export async function mintRewardBadge(args: {
     (current) =>
       appendTransactionMessageInstructions(
         [
-          getCreateV1Instruction({
+          getCreateV2Instruction({
             asset: assetSigner,
             authority: config.signer,
             collection: collectionAddress,
             name: args.name,
             owner,
             payer: config.signer,
-            updateAuthority: config.signer.address,
             uri: args.metadataUrl
           })
         ],
