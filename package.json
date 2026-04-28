@@ -1,0 +1,36 @@
+{
+  "name": "nightshift-071-stampquest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "StampQuest build 071 - mobile-first Solana week checkpoint passport",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch src/server/index.ts",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "start": "node dist/server/index.js"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.2.0",
+    "@obrera/mpl-core-kit-lib": "file:packages/mpl-core-kit-lib",
+    "@solana/kit": "6.8.0",
+    "express": "5.2.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "22.19.17",
+    "@types/react": "18.3.28",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "5.2.0",
+    "concurrently": "9.2.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.2"
+  }
+}

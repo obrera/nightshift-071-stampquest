@@ -1,0 +1,13 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3001
+    restart: unless-stopped
+    volumes:
+      - stampquest-data:/app/data
+
+volumes:
+  stampquest-data:

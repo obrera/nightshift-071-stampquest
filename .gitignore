@@ -1,0 +1,7 @@
+# nightshift-071-stampquest
+.codex
+node_modules/
+dist/
+.DS_Store
+data/stampquest-db.json
+npm-debug.log*
