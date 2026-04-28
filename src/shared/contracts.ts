@@ -180,6 +180,7 @@ export interface CheckpointCard {
   points: number;
   cooldownSeconds: number;
   sortOrder: number;
+  demoCode?: string;
   redeemed: boolean;
   redeemedAt?: string;
   nextEligibleAt?: string;

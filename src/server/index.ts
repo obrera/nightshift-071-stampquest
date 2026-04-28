@@ -314,6 +314,7 @@ function buildPassport(state: AppState, user: UserRecord): PassportProgress | nu
       points: checkpoint.points,
       cooldownSeconds: checkpoint.cooldownSeconds,
       sortOrder: checkpoint.sortOrder,
+      demoCode: checkpoint.secretCode,
       redeemed: Boolean(redemption),
       redeemedAt: redemption?.createdAt,
       nextEligibleAt

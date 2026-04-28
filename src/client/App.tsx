@@ -610,6 +610,10 @@ export function App() {
               <h3>Redeem Checkpoints</h3>
               <span>Mobile-first code entry</span>
             </div>
+            <p className="muted">
+              Demo mode is on for the seeded rally, so each checkpoint loads with its sample code by
+              default. You can tap straight through the flow without hunting for hidden values.
+            </p>
             <div className="trail-list">
               {passport?.checkpointCards.map((checkpoint) => (
                 <article className="trail-card" key={checkpoint.id}>
@@ -618,6 +622,7 @@ export function App() {
                     <strong>{checkpoint.title}</strong>
                     <span>{checkpoint.district}</span>
                     <small>{checkpoint.hint}</small>
+                    {checkpoint.demoCode ? <small>Demo code: {checkpoint.demoCode}</small> : null}
                   </div>
                   <label>
                     <span>Checkpoint code</span>
@@ -630,7 +635,7 @@ export function App() {
                         }))
                       }
                       placeholder="Enter secret code"
-                      value={codeByCheckpoint[checkpoint.id] ?? ""}
+                      value={codeByCheckpoint[checkpoint.id] ?? checkpoint.demoCode ?? ""}
                     />
                   </label>
                   <button
