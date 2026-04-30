@@ -1,3 +1,4 @@
+import { Resvg } from "@resvg/resvg-js";
 import {
   address,
   assertIsAddress,
@@ -1020,13 +1021,31 @@ function getStampQuestBaseUrl() {
   return getEnv("STAMPQUEST_PUBLIC_BASE_URL") ?? `http://localhost:${port}`;
 }
 
-function createDiceBearGlassPngUrl(seed: string) {
-  const url = new URL(`https://api.dicebear.com/9.x/glass/png`);
-  url.searchParams.set("seed", seed);
-  url.searchParams.set("size", "512");
-  url.searchParams.set("scale", "90");
-  url.searchParams.set("backgroundType", "solid,gradientLinear");
-  return url.toString();
+function renderSvgToPng(svg: string, width: number) {
+  const resvg = new Resvg(svg, {
+    fitTo: { mode: "width", value: width },
+    font: { loadSystemFonts: true }
+  });
+  return resvg.render().asPng();
+}
+
+function buildRewardBadgeSvg() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="640" height="640" viewBox="0 0 640 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="640" height="640" rx="64" fill="#05101B"/>
+  <rect x="22" y="22" width="596" height="596" rx="42" stroke="#1EC8A5" stroke-opacity="0.35" stroke-width="4"/>
+  <circle cx="320" cy="238" r="122" fill="url(#g1)"/>
+  <path d="M206 390C206 327.04 257.04 276 320 276C382.96 276 434 327.04 434 390V398C434 425.614 411.614 448 384 448H256C228.386 448 206 425.614 206 398V390Z" fill="#0D2234"/>
+  <path d="M320 160L345.98 215.769L406.769 223.02L362.154 264.731L373.961 324.98L320 295.115L266.039 324.98L277.846 264.731L233.231 223.02L294.02 215.769L320 160Z" fill="#F4C15D"/>
+  <text x="320" y="492" text-anchor="middle" fill="#F3F7FB" font-size="44" font-family="Verdana, sans-serif">STAMPQUEST</text>
+  <text x="320" y="536" text-anchor="middle" fill="#88A0B5" font-size="24" font-family="Verdana, sans-serif">Afterglow Badge • Build 071</text>
+  <defs>
+    <linearGradient id="g1" x1="198" y1="116" x2="442" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1EC8A5"/>
+      <stop offset="1" stop-color="#F4C15D"/>
+    </linearGradient>
+  </defs>
+</svg>`;
 }
 
 app.get(
@@ -1035,7 +1054,7 @@ app.get(
     const state = await db.read();
     const rally = getRally(state, String(request.params.rallyId ?? ""));
     const user = state.users.find((entry) => entry.id === String(request.query.userId ?? ""));
-    const imageUrl = createDiceBearGlassPngUrl(`stampquest-${rally.id}-${user?.id ?? "guest"}`);
+    const imageUrl = `${getStampQuestBaseUrl()}/reward-badge.png`;
     response.json({
       name: `${rally.reward.name}${user ? ` • ${user.displayName}` : ""}`,
       symbol: rally.reward.symbol,
@@ -1061,22 +1080,11 @@ app.get(
 );
 
 app.get("/reward-badge.svg", (_request, response) => {
-  response.type("image/svg+xml").send(`<?xml version="1.0" encoding="UTF-8"?>
-<svg width="640" height="640" viewBox="0 0 640 640" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="640" height="640" rx="64" fill="#05101B"/>
-  <rect x="22" y="22" width="596" height="596" rx="42" stroke="#1EC8A5" stroke-opacity="0.35" stroke-width="4"/>
-  <circle cx="320" cy="238" r="122" fill="url(#g1)"/>
-  <path d="M206 390C206 327.04 257.04 276 320 276C382.96 276 434 327.04 434 390V398C434 425.614 411.614 448 384 448H256C228.386 448 206 425.614 206 398V390Z" fill="#0D2234"/>
-  <path d="M320 160L345.98 215.769L406.769 223.02L362.154 264.731L373.961 324.98L320 295.115L266.039 324.98L277.846 264.731L233.231 223.02L294.02 215.769L320 160Z" fill="#F4C15D"/>
-  <text x="320" y="492" text-anchor="middle" fill="#F3F7FB" font-size="44" font-family="Verdana, sans-serif">STAMPQUEST</text>
-  <text x="320" y="536" text-anchor="middle" fill="#88A0B5" font-size="24" font-family="Verdana, sans-serif">Afterglow Badge • Build 071</text>
-  <defs>
-    <linearGradient id="g1" x1="198" y1="116" x2="442" y2="360" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1EC8A5"/>
-      <stop offset="1" stop-color="#F4C15D"/>
-    </linearGradient>
-  </defs>
-</svg>`);
+  response.type("image/svg+xml").send(buildRewardBadgeSvg());
+});
+
+app.get("/reward-badge.png", (_request, response) => {
+  response.type("image/png").send(renderSvgToPng(buildRewardBadgeSvg(), 1024));
 });
 
 app.use(express.static(publicDir));

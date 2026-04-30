@@ -17,6 +17,7 @@
   "dependencies": {
     "@noble/hashes": "^2.2.0",
     "@obrera/mpl-core-kit-lib": "file:packages/mpl-core-kit-lib",
+    "@resvg/resvg-js": "^2.6.2",
     "@solana/kit": "6.8.0",
     "@wallet-ui/react": "4.0.3",
     "express": "5.2.1",
