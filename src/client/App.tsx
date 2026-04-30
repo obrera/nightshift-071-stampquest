@@ -71,23 +71,20 @@ function WalletConnectOption({
 }
 
 function WalletSignInOption({
+  account,
   onError,
   onNotice,
   refresh,
   wallet
 }: {
+  account: UiWallet["accounts"][number];
   onError: (value: string | null) => void;
   onNotice: (value: string | null) => void;
   refresh: () => Promise<void>;
   wallet: UiWallet;
 }) {
-  const account = wallet.accounts?.[0];
   const signIn = useSignIn(wallet);
   const [isBusy, setIsBusy] = useState(false);
-
-  if (!account) {
-    return null;
-  }
 
   return (
     <button
@@ -126,23 +123,20 @@ function WalletSignInOption({
 }
 
 function WalletMessageSignInOption({
+  account,
   onError,
   onNotice,
   refresh,
   wallet
 }: {
+  account: UiWallet["accounts"][number];
   onError: (value: string | null) => void;
   onNotice: (value: string | null) => void;
   refresh: () => Promise<void>;
   wallet: UiWallet;
 }) {
-  const account = wallet.accounts?.[0];
   const [isBusy, setIsBusy] = useState(false);
   const signMessage = useSignMessage(account);
-
-  if (!account) {
-    return null;
-  }
 
   return (
     <button
@@ -391,6 +385,7 @@ export function App() {
                 if (SolanaSignIn in wallet.features) {
                   return (
                     <WalletSignInOption
+                      account={wallet.accounts[0]}
                       key={wallet.name}
                       onError={setError}
                       onNotice={setNotice}
@@ -402,6 +397,7 @@ export function App() {
 
                 return (
                   <WalletMessageSignInOption
+                    account={wallet.accounts[0]}
                     key={wallet.name}
                     onError={setError}
                     onNotice={setNotice}
