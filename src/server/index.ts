@@ -1016,18 +1016,32 @@ app.post(
   })
 );
 
+function getStampQuestBaseUrl() {
+  return getEnv("STAMPQUEST_PUBLIC_BASE_URL") ?? `http://localhost:${port}`;
+}
+
+function createDiceBearGlassPngUrl(seed: string) {
+  const url = new URL(`https://api.dicebear.com/9.x/glass/png`);
+  url.searchParams.set("seed", seed);
+  url.searchParams.set("size", "512");
+  url.searchParams.set("scale", "90");
+  url.searchParams.set("backgroundType", "solid,gradientLinear");
+  return url.toString();
+}
+
 app.get(
   "/api/rewards/:rallyId/metadata.json",
   asyncRoute(async (request, response) => {
     const state = await db.read();
     const rally = getRally(state, String(request.params.rallyId ?? ""));
     const user = state.users.find((entry) => entry.id === String(request.query.userId ?? ""));
+    const imageUrl = createDiceBearGlassPngUrl(`stampquest-${rally.id}-${user?.id ?? "guest"}`);
     response.json({
       name: `${rally.reward.name}${user ? ` • ${user.displayName}` : ""}`,
       symbol: rally.reward.symbol,
       description: rally.reward.description,
-      image: `${getEnv("STAMPQUEST_PUBLIC_BASE_URL")}/reward-badge.svg`,
-      external_url: getEnv("STAMPQUEST_PUBLIC_BASE_URL"),
+      image: imageUrl,
+      external_url: getStampQuestBaseUrl(),
       attributes: [
         { trait_type: "Rally", value: rally.title },
         { trait_type: "Season", value: rally.seasonLabel },
@@ -1037,8 +1051,8 @@ app.get(
         category: "image",
         files: [
           {
-            uri: `${getEnv("STAMPQUEST_PUBLIC_BASE_URL")}/reward-badge.svg`,
-            type: "image/svg+xml"
+            uri: imageUrl,
+            type: "image/png"
           }
         ]
       }

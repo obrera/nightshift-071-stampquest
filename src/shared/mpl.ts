@@ -12,6 +12,7 @@ export interface MplCoreMetadataInput {
   symbol: string;
   description: string;
   image: string;
+  imageMimeType?: string;
   external_url: string;
   collection: {
     name: string;
@@ -37,7 +38,7 @@ export interface MplCoreMetadata {
     category: "image";
     files: Array<{
       uri: string;
-      type: "image/svg+xml";
+      type: string;
     }>;
   };
   collection: {
@@ -82,7 +83,7 @@ export function buildMplCoreMetadata(input: MplCoreMetadataInput): MplCoreMetada
       files: [
         {
           uri: input.image,
-          type: "image/svg+xml"
+          type: input.imageMimeType ?? "image/png"
         }
       ]
     },
